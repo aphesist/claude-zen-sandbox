@@ -25,8 +25,10 @@ A profile is the real boundary.
 - `zen-claude.service` (systemd user unit): runs that profile as its own instance
   (`--no-remote --name zen-claude`), so it never takes your links, and quits it
   cleanly on stop.
-- A Hyprland rule (Lua config) that opens its windows on a hidden special
-  workspace, `special:claude`, instead of in front of you.
+- A Hyprland rule (Lua config) for where its windows open, without ever taking
+  focus: its own desktop, workspace 10 (default, so you can watch it work), a
+  hidden special workspace, or wherever you are. Set in the island (Settings >
+  Claude > Opens on, `claudeBrowserPlace` in Panacea's settings.json).
 
 ## Install
 
@@ -56,9 +58,11 @@ claude mcp add --scope user claudezilla \
 
 ## Use
 
-- Show or hide its window: `hyprctl dispatch 'hl.dsp.workspace.toggle_special("claude")'`
-- Sign in to a site for Claude: show the window and log in there by hand. Only
-  what you log into in this profile is ever available to it.
+- Watch it: go to desktop 10 (Super+0). When set to hidden:
+  `hyprctl dispatch 'hl.dsp.workspace.toggle_special("claude")'`
+- Sign in to a site for Claude: log in in its window by hand (for WhatsApp Web,
+  scan the QR code with your phone). Only what you log into in this profile is
+  ever available to it.
 - Start / stop by hand: `systemctl --user start|stop zen-claude`
 
 ## Undo
