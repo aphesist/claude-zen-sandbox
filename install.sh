@@ -16,7 +16,7 @@ XPI_URL="https://addons.mozilla.org/firefox/downloads/latest/claudezilla/latest.
 SYS_MANIFEST=/usr/lib/mozilla/native-messaging-hosts/claudezilla.json
 say() { printf '\n== %s\n' "$*"; }
 
-for c in git node npm curl zen-browser systemctl; do
+for c in git node npm curl jq unzip zen-browser systemctl; do
     command -v "$c" >/dev/null || { echo "missing: $c"; exit 1; }
 done
 
@@ -66,7 +66,8 @@ fi
 # Your own Zen profiles must NOT have the add-on: warn if one still does.
 for ej in "$CFG"/zen/*/extensions.json; do
     case "$ej" in "$PROFILE"/*) continue ;; esac
-    if grep -q '"id":"claudezilla@boot.industries"' "$ej" 2>/dev/null; then
+    # (one removed in about:addons stays listed as pendingUninstall until Zen restarts: that's fine)
+    if jq -e '.addons[] | select(.id == "claudezilla@boot.industries" and (.pendingUninstall | not))' "$ej" >/dev/null 2>&1; then
         echo
         echo "  WARNING: $(basename "$(dirname "$ej")") (your own Zen) still has Claudezilla."
         echo "  Remove it there (about:addons > Claudezilla > Remove): only Claude's profile should have it."
