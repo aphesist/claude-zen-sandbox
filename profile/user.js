@@ -20,5 +20,16 @@ user_pref("browser.sessionstore.resume_from_crash", false);
 user_pref("zen.welcome-screen.seen", true);
 user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
 
+// Our patched Claudezilla (orange look, kept tabs, the pixel Claude's mood signal) is
+// unsigned: Zen builds don't enforce signing, so allow it here, in this profile only.
+// Your own Zen profile keeps requiring signed add-ons. No add-on updates either, so
+// addons.mozilla.org never swaps it back for the stock one.
+user_pref("xpinstall.signatures.required", false);
+user_pref("extensions.update.enabled", false);
+user_pref("extensions.update.autoUpdateDefault", false);
+
+// chrome/userChrome.css: the orange tabs and the pixel Claude above them
+user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+
 // The house accent, so its windows are recognisable at a glance.
 user_pref("zen.theme.accent-color", "#d71921");

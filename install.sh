@@ -12,11 +12,10 @@ CZ_TAG="${CZ_TAG:-v0.7.7}"                                  # Claudezilla versio
 CZ="${XDG_DATA_HOME:-$HOME/.local/share}/claudezilla"
 PROFILE="$HOME/.config/zen/claude"
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
-XPI_URL="https://addons.mozilla.org/firefox/downloads/latest/claudezilla/latest.xpi"
 SYS_MANIFEST=/usr/lib/mozilla/native-messaging-hosts/claudezilla.json
 say() { printf '\n== %s\n' "$*"; }
 
-for c in git node npm curl jq unzip zen-browser systemctl; do
+for c in git node npm jq zip zen-browser systemctl; do
     command -v "$c" >/dev/null || { echo "missing: $c"; exit 1; }
 done
 
@@ -27,6 +26,10 @@ if [ -d "$CZ/.git" ]; then
 else
     git clone -q --depth 1 --branch "$CZ_TAG" https://github.com/boot-industries/claudezilla.git "$CZ"
 fi
+# our changes on top (patches/): a fixed agent id and kept tabs, so one client's
+# short sessions (the island runs one per message) share the same tabs
+git -C "$CZ" checkout -q -- . 2>/dev/null || true
+for p in "$HERE"/patches/*.patch; do git -C "$CZ" apply "$p"; done
 # its dependencies, without running any package install scripts
 (cd "$CZ/mcp" && npm install --quiet --ignore-scripts --no-audit --no-fund)
 printf '#!/bin/bash\nexec %s "%s/host/index.js" "$@"\n' "$(command -v node)" "$CZ" > "$CZ/host/run.sh"
@@ -44,18 +47,20 @@ rm -f "$CFG/zen/native-messaging-hosts/claudezilla.json" "$CFG/mozilla/native-me
 say "Claude's Zen profile in $PROFILE"
 mkdir -p "$PROFILE/extensions"
 cp "$HERE/profile/user.js" "$PROFILE/user.js"
+# our build of the add-on (patches/0002: orange look, no tab group, the pixel Claude's
+# mood signal), from the same pinned source as the host; unsigned, allowed in user.js
 XPI="$PROFILE/extensions/claudezilla@boot.industries.xpi"
-if [ ! -s "$XPI" ]; then
-    curl -fsSL --proto '=https' -o "$TMP/claudezilla.xpi" "$XPI_URL"
-    unzip -tq "$TMP/claudezilla.xpi" >/dev/null       # a real add-on, not an error page
-    cp "$TMP/claudezilla.xpi" "$XPI"
-fi
+(cd "$CZ/extension" && rm -f "$TMP/claudezilla.xpi" && zip -qr -X "$TMP/claudezilla.xpi" . -x '*.DS_Store')
+cmp -s "$TMP/claudezilla.xpi" "$XPI" || cp "$TMP/claudezilla.xpi" "$XPI"
+# the orange tabs and the pixel Claude above them (userChrome.css + critter-*.svg)
+mkdir -p "$PROFILE/chrome"
+cp "$HERE"/profile/chrome/* "$PROFILE/chrome/"
 
 say "systemd user unit (started on demand when Claude needs the browser)"
 install -D -m 644 "$HERE/systemd/zen-claude.service" "$CFG/systemd/user/zen-claude.service"
 systemctl --user daemon-reload
 
-say "Hyprland: its windows open on a hidden workspace (special:claude)"
+say "Hyprland: where its windows open (Settings > Claude > Opens on; default desktop 10)"
 if [ -d "$CFG/hypr/custom" ]; then
     install -m 644 "$HERE/hypr/zen-claude.lua" "$CFG/hypr/custom/zen-claude.lua"
     W="$CFG/hypr/custom/windowrules.lua"

@@ -1,0 +1,64 @@
+/* Claude's Zen (claude-zen-sandbox). Every tab in this profile is Claude's.
+ *
+ * - Claude-orange tabs: a thin outline on all of them, a filled one on the tab it
+ *   works in, pulsing while it acts.
+ * - The pixel Claude (critter-*.svg, from tools/make-critter.py) on the Space's
+ *   title row above the tabs. The patched Claudezilla add-on sets the window's
+ *   title preface ("Claude is working · " / "Claude is reading · "); it shows up
+ *   as the titlepreface attribute on the window, and picks the animation here:
+ *   idle = a slow walk and blinks, reading = "· · ·", working = crab mode, scuttling
+ *   sideways along the row with its claws up.
+ */
+
+:root {
+  --claude-orange: #d97757;
+}
+
+/* ---------------------------------------------------------------- tabs */
+.tabbrowser-tab > .tab-stack > .tab-background {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--claude-orange) 30%, transparent) !important;
+}
+.tabbrowser-tab[selected] > .tab-stack > .tab-background {
+  background: color-mix(in srgb, var(--claude-orange) 16%, transparent) !important;
+  box-shadow: inset 0 0 0 1.5px var(--claude-orange) !important;
+}
+:root[titlepreface*="working"] .tabbrowser-tab[selected] > .tab-stack > .tab-background {
+  animation: claude-tab-pulse 1.4s ease-in-out infinite;
+}
+@keyframes claude-tab-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1.5px var(--claude-orange), 0 0 0 0 transparent; }
+  50%      { box-shadow: inset 0 0 0 1.5px var(--claude-orange), 0 0 10px 1px color-mix(in srgb, var(--claude-orange) 55%, transparent); }
+}
+
+/* ---------------------------------------------------------------- the pixel Claude */
+.zen-current-workspace-indicator {
+  overflow: visible !important;
+}
+.zen-current-workspace-indicator::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  /* 11 x 11 pixels; 3.125 px each = exactly 5 screen pixels at 1.6 scale, so it
+     stays crisp. Feet on the divider line under the row. */
+  width: 34.375px;
+  height: 34.375px;
+  right: 10px;
+  bottom: -15px;
+  pointer-events: none;
+  background: url("critter-idle.svg") center / contain no-repeat;
+  image-rendering: pixelated;
+  transition: right 0.6s ease-out;
+}
+:root[titlepreface*="reading"] .zen-current-workspace-indicator::after {
+  background-image: url("critter-reading.svg");
+}
+:root[titlepreface*="working"] .zen-current-workspace-indicator::after {
+  background-image: url("critter-acting.svg");
+  animation: claude-crab-walk 2.8s ease-in-out infinite alternate;
+}
+@keyframes claude-crab-walk {           /* sideways, like a crab, along the row */
+  0%   { right: 10px; }
+  45%  { right: calc(100% - 46px); }
+  55%  { right: calc(100% - 46px); }
+  100% { right: 10px; }
+}

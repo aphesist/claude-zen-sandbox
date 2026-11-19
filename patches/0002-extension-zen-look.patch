@@ -1,0 +1,165 @@
+diff --git a/extension/background.js b/extension/background.js
+index bcfd71c..cb4e120 100644
+--- a/extension/background.js
++++ b/extension/background.js
+@@ -38,7 +38,7 @@ async function isPrivateModeRequired() {
+   try {
+     const stored = await browser.storage.local.get('claudezilla');
+     const settings = stored.claudezilla || {};
+-    return settings.privateMode !== false; // default true
++    return settings.privateMode === true; // claude-zen-sandbox: default false (its own profile keeps its logins)
+   } catch {
+     return true;
+   }
+@@ -892,8 +892,35 @@ async function getSession(windowId) {
+  *
+  * SECURITY: Most commands require a private window
+  */
++// claude-zen-sandbox: tell the window what Claude is doing. windows.update({titlePreface})
++// puts "Claude is working · " in front of the window title and in the window's
++// titlepreface attribute, which userChrome.css reads to pick the pixel Claude's animation.
++const MOOD_ACT = new Set(['navigate', 'createWindow', 'click', 'type', 'pressKey', 'scroll', 'closeTab',
++  'attachTab', 'handleConsent', 'setViewport', 'resizeWindow', 'evaluate']);
++const MOOD_READ = new Set(['getContent', 'getAccessibilitySnapshot', 'getPageState', 'find', 'getElementInfo',
++  'screenshot', 'waitFor', 'getConsoleLogs', 'getNetworkRequests', 'getTabs', 'listAllTabs']);
++let moodTimer = null;
++let moodNow = '';
++function setMood(mood, retry = true) {
++  if (!claudezillaWindow) { if (retry) setTimeout(() => setMood(mood, false), 1500); return; }   // createWindow: not open yet
++  if (mood === moodNow) return;
++  moodNow = mood;
++  const titlePreface = { acting: 'Claude is working · ', reading: 'Claude is reading · ', idle: '' }[mood];
++  browser.windows.update(claudezillaWindow.windowId, { titlePreface }).catch(() => { moodNow = ''; });
++}
++function claudeMood(command) {
++  const mood = MOOD_ACT.has(command) ? 'acting' : MOOD_READ.has(command) ? 'reading' : null;
++  if (!mood) return;
++  setMood(mood);
++  clearTimeout(moodTimer);
++  moodTimer = setTimeout(() => setMood('idle'), mood === 'acting' ? 6000 : 4000);
++}
++
+ async function handleCliCommand(message) {
+   const { id, command, params = {} } = message;
++  claudeMood(command);   // claude-zen-sandbox: the pixel Claude's mood
++  // ...and bring the tab it acts on to the front, so you see what it does
++  if (MOOD_ACT.has(command) && Number.isInteger(params.tabId)) browser.tabs.update(params.tabId, { active: true }).catch(() => {});
+ 
+   console.log('[claudezilla] CLI command:', command);
+ 
+@@ -1149,7 +1176,7 @@ async function handleCliCommand(message) {
+           const newTab = await browser.tabs.create({
+             windowId: claudezillaWindow.windowId,
+             url: url || 'about:blank',
+-            active: !claudezillaWindow.adopted
++            active: true   // claude-zen-sandbox: its own profile, every tab is Claude's: open it in front, to be watched
+           });
+           tabId = newTab.id;
+           claudezillaWindow.tabs.push({ tabId, ownerId });
+@@ -1216,7 +1243,7 @@ async function handleCliCommand(message) {
+           // Create tab group for visual distinction (Firefox 138+)
+           let groupId = null;
+           try {
+-            if (browser.tabs.group && tabId) {
++            if (false && browser.tabs.group && tabId) {   // claude-zen-sandbox: no group (Zen makes it a folder)
+               groupId = await browser.tabs.group({
+                 tabIds: [tabId],
+                 createProperties: { windowId: win.id }
+diff --git a/extension/content.js b/extension/content.js
+index ae76c67..f87ecc4 100644
+--- a/extension/content.js
++++ b/extension/content.js
+@@ -10,7 +10,7 @@
+ 
+ // Settings (loaded from storage)
+ let settings = {
+-  showWatermark: true,
++  showWatermark: false,   // claude-zen-sandbox: the pixel Claude lives above the tabs instead
+   showFocusglow: true,
+   allowEvaluate: false,  // SECURITY: firefox_evaluate requires explicit opt-in (AMO compliance)
+ };
+@@ -365,57 +365,31 @@ function initFocusglow() {
+       75% { transform: translate(-3px, -14px) scale(0.3); opacity: 0.2; }
+       100% { transform: translate(1px, -18px) scale(0.1); opacity: 0; }
+     }
++    /* claude-zen-sandbox: Claude orange, like Claude in Chrome: a clean outline and a soft glow */
+     #claudezilla-focusglow {
+       position: absolute;
+       pointer-events: none;
+       z-index: 2147483646;
+-      border-radius: 6px;
+-      border: 3px solid rgba(255, 215, 0, 0.9);
+-      background: rgba(255, 215, 0, 0.15);
+-      box-shadow:
+-        0 0 15px 6px rgba(255, 215, 0, 0.8),
+-        0 0 30px 12px rgba(255, 165, 0, 0.6),
+-        0 0 50px 20px rgba(255, 215, 0, 0.35);
+-      animation: claudezilla-sparkle 1.5s ease-in-out infinite;
+-      transition: top 0.3s ease-out, left 0.3s ease-out, width 0.3s ease-out, height 0.3s ease-out;
++      border-radius: 8px;
++      border: 2px solid #d97757;
++      background: rgba(217, 119, 87, 0.10);
++      box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.22), 0 0 18px 2px rgba(217, 119, 87, 0.45);
++      animation: claudezilla-pulse 1.6s ease-in-out infinite;
++      transition: top 0.25s ease-out, left 0.25s ease-out, width 0.25s ease-out, height 0.25s ease-out;
+       display: none;
+       opacity: 0;
+     }
++    @keyframes claudezilla-pulse {
++      0%, 100% { box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.22), 0 0 18px 2px rgba(217, 119, 87, 0.45); }
++      50% { box-shadow: 0 0 0 6px rgba(217, 119, 87, 0.12), 0 0 26px 4px rgba(217, 119, 87, 0.30); }
++    }
+     #claudezilla-focusglow.visible {
+       opacity: 1;
+-      transition: top 0.3s ease-out, left 0.3s ease-out, width 0.3s ease-out, height 0.3s ease-out, opacity 1s ease-in;
++      transition: top 0.25s ease-out, left 0.25s ease-out, width 0.25s ease-out, height 0.25s ease-out, opacity 0.3s ease-in;
+     }
+     #claudezilla-focusglow.fading {
+       opacity: 0;
+-      transition: top 0.3s ease-out, left 0.3s ease-out, width 0.3s ease-out, height 0.3s ease-out, opacity 2s ease-out;
+-    }
+-    #claudezilla-focusglow.visible::before,
+-    #claudezilla-focusglow.visible::after {
+-      content: '';
+-      position: absolute;
+-      width: 4px;
+-      height: 4px;
+-      border-radius: 50%;
+-      background: radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(255,215,0,0.8) 50%, transparent 100%);
+-      pointer-events: none;
+-    }
+-    #claudezilla-focusglow.visible::before {
+-      top: 20%;
+-      left: 10%;
+-      animation: claudezilla-dust 1.8s ease-out infinite;
+-      box-shadow:
+-        30px 10px 0 0 rgba(255,215,0,0.7),
+-        60px -5px 0 -1px rgba(255,255,255,0.6),
+-        90px 15px 0 0 rgba(255,215,0,0.5);
+-    }
+-    #claudezilla-focusglow.visible::after {
+-      top: 60%;
+-      right: 15%;
+-      animation: claudezilla-dust-reverse 2.2s ease-out infinite 0.5s;
+-      box-shadow:
+-        -25px -10px 0 0 rgba(255,215,0,0.6),
+-        -55px 5px 0 -1px rgba(255,255,255,0.5),
+-        -80px -8px 0 0 rgba(255,215,0,0.4);
++      transition: top 0.25s ease-out, left 0.25s ease-out, width 0.25s ease-out, height 0.25s ease-out, opacity 1.2s ease-out;
+     }
+   `;
+   document.head.appendChild(style);
+diff --git a/extension/manifest.json b/extension/manifest.json
+index dacf095..ae5551f 100644
+--- a/extension/manifest.json
++++ b/extension/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 2,
+-  "name": "Claudezilla",
+-  "version": "0.7.7",
++  "name": "Claudezilla (claude-zen-sandbox)",
++  "version": "0.7.7.3",
+   "description": "Browser automation for Claude Code via Firefox. No Chrome, no telemetry. Navigate, screenshot, click, type, extract data via MCP.",
+   "author": "Chris Lyons <support@boot.industries>",
+   "browser_specific_settings": {

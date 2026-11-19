@@ -1,0 +1,28 @@
+diff --git a/mcp/server.js b/mcp/server.js
+index b5e85e2..12f1c17 100644
+--- a/mcp/server.js
++++ b/mcp/server.js
+@@ -83,7 +83,12 @@ function loadAuthToken() {
+ // SECURITY: Unique agent ID with 128-bit entropy (16 bytes = 32 hex chars)
+ // Used for tab ownership tracking - only the agent that created a tab can close it
+ // Previous: 4 bytes (32 bits) was too weak and predictable
+-const AGENT_ID = `agent_${randomBytes(16).toString('hex')}_${process.pid}`;
++// claude-zen-sandbox: a fixed agent id (CLAUDEZILLA_AGENT_ID) lets every short-lived
++// session of one client (Panacea's island runs one per message) keep using the
++// same tabs, instead of each new session being locked out of the last one's.
++const AGENT_ID = process.env.CLAUDEZILLA_AGENT_ID && /^[A-Za-z0-9_-]{6,64}$/.test(process.env.CLAUDEZILLA_AGENT_ID)
++  ? process.env.CLAUDEZILLA_AGENT_ID
++  : `agent_${randomBytes(16).toString('hex')}_${process.pid}`;
+ 
+ /**
+  * SECURITY: Truncate agent ID for privacy in logs and error messages
+@@ -2000,6 +2005,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  * Non-blocking - we don't wait for response since we're exiting
+  */
+ async function sendGoodbye() {
++  // claude-zen-sandbox: CLAUDEZILLA_KEEP_TABS=1 leaves this agent's tabs open when the
++  // session ends (the goodbye would close them all).
++  if (process.env.CLAUDEZILLA_KEEP_TABS === '1') return;
+   try {
+     // Shutting down must never launch Firefox, and must not wait on the
+     // ~155 s socket default when the host is unresponsive.
