@@ -1,5 +1,5 @@
 diff --git a/mcp/server.js b/mcp/server.js
-index b5e85e2..12f1c17 100644
+index b5e85e2..2df83f1 100644
 --- a/mcp/server.js
 +++ b/mcp/server.js
 @@ -83,7 +83,12 @@ function loadAuthToken() {
@@ -16,7 +16,17 @@ index b5e85e2..12f1c17 100644
  
  /**
   * SECURITY: Truncate agent ID for privacy in logs and error messages
-@@ -2000,6 +2005,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
+@@ -1870,6 +1875,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
+       if (sid) commandParams.sessionId = sid;
+     }
+ 
++    // claude-zen-sandbox: Space mode (Claude in a Space of your own Zen profile)
++    if (process.env.CLAUDEZILLA_ZEN_SPACE === '1') commandParams.zenSpace = true;
++
+     // Domain allowlist check for navigate/createWindow
+     if (name === 'firefox_navigate' || name === 'firefox_create_window') {
+       const url = commandParams.url;
+@@ -2000,6 +2008,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   * Non-blocking - we don't wait for response since we're exiting
   */
  async function sendGoodbye() {

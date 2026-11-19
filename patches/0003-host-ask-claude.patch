@@ -1,0 +1,35 @@
+diff --git a/host/index.js b/host/index.js
+index fb76933..8c4e1b3 100755
+--- a/host/index.js
++++ b/host/index.js
+@@ -13,6 +13,7 @@
+  */
+ 
+ import { readMessage, sendMessage } from './protocol.js';
++import { spawn } from 'child_process';
+ import { unlinkSync, existsSync, writeFileSync, readFileSync } from 'fs';
+ import { createServer } from 'net';
+ import { randomUUID, randomBytes, timingSafeEqual } from 'crypto';
+@@ -376,6 +377,22 @@ function handleExtensionMessage(message) {
+     return;
+   }
+ 
++  // claude-zen-sandbox: right-click "Send tab to Claude": open the island chat
++  // (Panacea, IPC askAbout) with the tab named, waiting for your prompt
++  if (command === 'askClaude') {
++    const p = message.params || {};
++    const title = String(p.title || '').replace(/\s+/g, ' ').slice(0, 200);
++    const draft = `In my Claude Space, tab ${p.tabId}: "${title}" ${String(p.url || '').slice(0, 2000)}\n\n`;
++    const arg = JSON.stringify({ draft, files: [], send: false });
++    try {
++      const child = spawn('qs', ['-p', `${process.env.HOME}/.config/panacea`, 'ipc', 'call', 'pill', 'askAbout', arg],
++        { detached: true, stdio: 'ignore' });
++      child.on('error', () => {});
++      child.unref();
++    } catch (e) { log('askClaude failed:', e.message); }
++    return;
++  }
++
+   // Handle extension-initiated requests (like ping from popup)
+   if (command === 'ping') {
+     sendMessage({ id, success: true, result: { pong: true, timestamp: Date.now() } });

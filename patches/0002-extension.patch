@@ -1,0 +1,314 @@
+diff --git a/extension/background.js b/extension/background.js
+index bcfd71c..45f5158 100644
+--- a/extension/background.js
++++ b/extension/background.js
+@@ -38,7 +38,7 @@ async function isPrivateModeRequired() {
+   try {
+     const stored = await browser.storage.local.get('claudezilla');
+     const settings = stored.claudezilla || {};
+-    return settings.privateMode !== false; // default true
++    return settings.privateMode === true; // claude-zen-sandbox: default false (its own profile keeps its logins)
+   } catch {
+     return true;
+   }
+@@ -349,7 +349,8 @@ function verifyTabOwnership(tabId, agentId, operation) {
+   }
+   // Allow operations on tabs with 'unknown' owner (legacy compatibility)
+   // But if both have IDs and they don't match, deny
+-  if (tabEntry.ownerId !== 'unknown' && agentId && tabEntry.ownerId !== agentId) {
++  // claude-zen-sandbox: only the agent's own tabs (no 'unknown' loophole); yours only via attach
++  if (agentId && tabEntry.ownerId !== agentId) {
+     throw new Error(`OWNERSHIP: Cannot ${operation} tab ${tabId} (owned by ${tabEntry.ownerId}, you are ${agentId})`);
+   }
+   return tabEntry;
+@@ -892,8 +893,87 @@ async function getSession(windowId) {
+  *
+  * SECURITY: Most commands require a private window
+  */
++// claude-zen-sandbox: tell the window what Claude is doing. windows.update({titlePreface})
++// puts "Claude is working · " in front of the window title and in the window's
++// titlepreface attribute, which userChrome.css reads to pick the pixel Claude's animation.
++const MOOD_ACT = new Set(['navigate', 'createWindow', 'click', 'type', 'pressKey', 'scroll', 'closeTab',
++  'attachTab', 'handleConsent', 'setViewport', 'resizeWindow', 'evaluate']);
++const MOOD_READ = new Set(['getContent', 'getAccessibilitySnapshot', 'getPageState', 'find', 'getElementInfo',
++  'screenshot', 'waitFor', 'getConsoleLogs', 'getNetworkRequests', 'getTabs', 'listAllTabs']);
++let moodTimer = null;
++let moodNow = '';
++function setMood(mood, retry = true) {
++  if (!claudezillaWindow) { if (retry) setTimeout(() => setMood(mood, false), 1500); return; }   // createWindow: not open yet
++  if (mood === moodNow) return;
++  moodNow = mood;
++  // invisible markers (zero-width characters), so your window title stays as it is;
++  // userChrome matches them through the window's titlepreface attribute
++  const titlePreface = { acting: '\u200B', reading: '\u200C', idle: '' }[mood];
++  browser.windows.update(claudezillaWindow.windowId, { titlePreface }).catch(() => { moodNow = ''; });
++}
++function claudeMood(command) {
++  const mood = MOOD_ACT.has(command) ? 'acting' : MOOD_READ.has(command) ? 'reading' : null;
++  if (!mood) return;
++  setMood(mood);
++  clearTimeout(moodTimer);
++  moodTimer = setTimeout(() => setMood('idle'), mood === 'acting' ? 15000 : 10000);   // spans Claude's thinking between steps
++}
++
++// claude-zen-sandbox: "Space mode" (Claude in a Space of your own Zen profile).
++// Tabs open in the background through claude-space.html, which a Zen space-routing
++// rule sends to the Claude space; nothing is ever brought to the front.
++let spaceMode = false;
++const SPACE_PAGE = browser.runtime.getURL('claude-space.html');
++function spaceUrl(url) {
++  return url && url !== 'about:blank' ? SPACE_PAGE + '#' + encodeURIComponent(url) : SPACE_PAGE;
++}
++async function waitForSpaceRedirect(tabId) {   // until the real page has replaced the marker page
++  for (let i = 0; i < 50; i++) {
++    const tab = await browser.tabs.get(tabId).catch(() => null);
++    if (!tab || !String(tab.url || '').startsWith(SPACE_PAGE.split('claude-space.html')[0])) return;
++    await new Promise(r => setTimeout(r, 200));
++  }
++}
++
++// claude-zen-sandbox: right-click "Send tab to Claude" / "Open link in Claude's Space".
++// The page opens again in the Claude space (Zen has no add-on API to move a tab
++// between spaces), owned by the island's agent, the original tab closes (unless
++// pinned), and the island chat opens with the tab attached, waiting for your prompt.
++const ISLAND_AGENT = 'agent_panacea_island';
++browser.menus.removeAll().then(() => {
++  browser.menus.create({ id: 'claude-send-tab', title: 'Send tab to Claude', contexts: ['tab'] });
++  browser.menus.create({ id: 'claude-send-page', title: 'Send tab to Claude', contexts: ['page'] });
++  browser.menus.create({ id: 'claude-open-link', title: "Open link in Claude's Space", contexts: ['link'] });
++});
++browser.menus.onClicked.addListener(async (info, tab) => {
++  const isLink = info.menuItemId === 'claude-open-link';
++  const url = isLink ? info.linkUrl : tab?.url;
++  if (!url || !/^https?:\/\//i.test(url)) return;
++  try {
++    const windowId = tab?.windowId ?? (await browser.windows.getLastFocused({ windowTypes: ['normal'] })).id;
++    const newTab = await browser.tabs.create({ windowId, url: spaceUrl(url), active: false });
++    await waitForSpaceRedirect(newTab.id);
++    if (!claudezillaWindow || claudezillaWindow.windowId !== windowId) {
++      claudezillaWindow = { windowId, tabs: claudezillaWindow?.windowId === windowId ? claudezillaWindow.tabs : [],
++        createdAt: Date.now(), groupId: null, isPrivate: false, adopted: true };
++    }
++    claudezillaWindow.tabs.push({ tabId: newTab.id, ownerId: ISLAND_AGENT });
++    activeTabId = newTab.id;
++    if (typeof persistWindowState === 'function') persistWindowState();
++    if (!isLink && tab && !tab.pinned) browser.tabs.remove(tab.id).catch(() => {});
++    const title = isLink ? (info.linkText || url) : (tab.title || url);
++    if (port) port.postMessage({ command: 'askClaude', params: { tabId: newTab.id, url, title } });
++  } catch (e) {
++    console.log('[claudezilla] send to Claude failed:', e?.message || e);
++  }
++});
++
+ async function handleCliCommand(message) {
+   const { id, command, params = {} } = message;
++  if (params && 'zenSpace' in params) { spaceMode = params.zenSpace === true; delete params.zenSpace; }
++  claudeMood(command);   // claude-zen-sandbox: the pixel Claude's mood
++  // ...and bring the tab it acts on to the front, so you see what it does
++  if (!spaceMode && MOOD_ACT.has(command) && Number.isInteger(params.tabId)) browser.tabs.update(params.tabId, { active: true }).catch(() => {});
+ 
+   console.log('[claudezilla] CLI command:', command);
+ 
+@@ -1148,10 +1228,13 @@ async function handleCliCommand(message) {
+           // selected tab is the user's: never switch it away.
+           const newTab = await browser.tabs.create({
+             windowId: claudezillaWindow.windowId,
+-            url: url || 'about:blank',
+-            active: !claudezillaWindow.adopted
++            url: spaceMode ? spaceUrl(url) : (url || 'about:blank'),
++            // claude-zen-sandbox: its own profile: in front, to be watched; Space mode: in the
++            // background (the routing rule moves it to the Claude space, your view stays put)
++            active: !spaceMode
+           });
+           tabId = newTab.id;
++          if (spaceMode) await waitForSpaceRedirect(tabId);
+           claudezillaWindow.tabs.push({ tabId, ownerId });
+           activeTabId = tabId;
+ 
+@@ -1185,10 +1268,11 @@ async function handleCliCommand(message) {
+           if (adoptedWindow) {
+             const newTab = await browser.tabs.create({
+               windowId: win.id,
+-              url: url || 'about:blank',
++              url: spaceMode ? spaceUrl(url) : (url || 'about:blank'),
+               active: false
+             });
+             tabId = newTab.id;
++            if (spaceMode) await waitForSpaceRedirect(tabId);
+           } else {
+             try {
+               win = await browser.windows.create({
+@@ -1216,7 +1300,7 @@ async function handleCliCommand(message) {
+           // Create tab group for visual distinction (Firefox 138+)
+           let groupId = null;
+           try {
+-            if (browser.tabs.group && tabId) {
++            if (false && browser.tabs.group && tabId) {   // claude-zen-sandbox: no group (Zen makes it a folder)
+               groupId = await browser.tabs.group({
+                 tabIds: [tabId],
+                 createProperties: { windowId: win.id }
+diff --git a/extension/claude-space.html b/extension/claude-space.html
+new file mode 100644
+index 0000000..779ca78
+--- /dev/null
++++ b/extension/claude-space.html
+@@ -0,0 +1,7 @@
++<!DOCTYPE html>
++<!-- claude-zen-sandbox: Claude's tabs start here, so Zen's space-routing rule
++     ("URL contains claude-space.html" -> the Claude space) moves them into the
++     Claude space; then it hands over to the real address. -->
++<html><head><meta charset="utf-8"><title>Claude</title>
++<style>html{background:#1c1b22}</style>
++<script src="claude-space.js"></script></head><body></body></html>
+diff --git a/extension/claude-space.js b/extension/claude-space.js
+new file mode 100644
+index 0000000..f43d97e
+--- /dev/null
++++ b/extension/claude-space.js
+@@ -0,0 +1,3 @@
++// claude-zen-sandbox: go on to the real address (http/https only)
++const target = decodeURIComponent(location.hash.slice(1));
++if (/^https?:\/\//i.test(target)) location.replace(target);
+diff --git a/extension/content.js b/extension/content.js
+index ae76c67..f87ecc4 100644
+--- a/extension/content.js
++++ b/extension/content.js
+@@ -10,7 +10,7 @@
+ 
+ // Settings (loaded from storage)
+ let settings = {
+-  showWatermark: true,
++  showWatermark: false,   // claude-zen-sandbox: the pixel Claude lives above the tabs instead
+   showFocusglow: true,
+   allowEvaluate: false,  // SECURITY: firefox_evaluate requires explicit opt-in (AMO compliance)
+ };
+@@ -365,57 +365,31 @@ function initFocusglow() {
+       75% { transform: translate(-3px, -14px) scale(0.3); opacity: 0.2; }
+       100% { transform: translate(1px, -18px) scale(0.1); opacity: 0; }
+     }
++    /* claude-zen-sandbox: Claude orange, like Claude in Chrome: a clean outline and a soft glow */
+     #claudezilla-focusglow {
+       position: absolute;
+       pointer-events: none;
+       z-index: 2147483646;
+-      border-radius: 6px;
+-      border: 3px solid rgba(255, 215, 0, 0.9);
+-      background: rgba(255, 215, 0, 0.15);
+-      box-shadow:
+-        0 0 15px 6px rgba(255, 215, 0, 0.8),
+-        0 0 30px 12px rgba(255, 165, 0, 0.6),
+-        0 0 50px 20px rgba(255, 215, 0, 0.35);
+-      animation: claudezilla-sparkle 1.5s ease-in-out infinite;
+-      transition: top 0.3s ease-out, left 0.3s ease-out, width 0.3s ease-out, height 0.3s ease-out;
++      border-radius: 8px;
++      border: 2px solid #d97757;
++      background: rgba(217, 119, 87, 0.10);
++      box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.22), 0 0 18px 2px rgba(217, 119, 87, 0.45);
++      animation: claudezilla-pulse 1.6s ease-in-out infinite;
++      transition: top 0.25s ease-out, left 0.25s ease-out, width 0.25s ease-out, height 0.25s ease-out;
+       display: none;
+       opacity: 0;
+     }
++    @keyframes claudezilla-pulse {
++      0%, 100% { box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.22), 0 0 18px 2px rgba(217, 119, 87, 0.45); }
++      50% { box-shadow: 0 0 0 6px rgba(217, 119, 87, 0.12), 0 0 26px 4px rgba(217, 119, 87, 0.30); }
++    }
+     #claudezilla-focusglow.visible {
+       opacity: 1;
+-      transition: top 0.3s ease-out, left 0.3s ease-out, width 0.3s ease-out, height 0.3s ease-out, opacity 1s ease-in;
++      transition: top 0.25s ease-out, left 0.25s ease-out, width 0.25s ease-out, height 0.25s ease-out, opacity 0.3s ease-in;
+     }
+     #claudezilla-focusglow.fading {
+       opacity: 0;
+-      transition: top 0.3s ease-out, left 0.3s ease-out, width 0.3s ease-out, height 0.3s ease-out, opacity 2s ease-out;
+-    }
+-    #claudezilla-focusglow.visible::before,
+-    #claudezilla-focusglow.visible::after {
+-      content: '';
+-      position: absolute;
+-      width: 4px;
+-      height: 4px;
+-      border-radius: 50%;
+-      background: radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(255,215,0,0.8) 50%, transparent 100%);
+-      pointer-events: none;
+-    }
+-    #claudezilla-focusglow.visible::before {
+-      top: 20%;
+-      left: 10%;
+-      animation: claudezilla-dust 1.8s ease-out infinite;
+-      box-shadow:
+-        30px 10px 0 0 rgba(255,215,0,0.7),
+-        60px -5px 0 -1px rgba(255,255,255,0.6),
+-        90px 15px 0 0 rgba(255,215,0,0.5);
+-    }
+-    #claudezilla-focusglow.visible::after {
+-      top: 60%;
+-      right: 15%;
+-      animation: claudezilla-dust-reverse 2.2s ease-out infinite 0.5s;
+-      box-shadow:
+-        -25px -10px 0 0 rgba(255,215,0,0.6),
+-        -55px 5px 0 -1px rgba(255,255,255,0.5),
+-        -80px -8px 0 0 rgba(255,215,0,0.4);
++      transition: top 0.25s ease-out, left 0.25s ease-out, width 0.25s ease-out, height 0.25s ease-out, opacity 1.2s ease-out;
+     }
+   `;
+   document.head.appendChild(style);
+diff --git a/extension/icons/claude.svg b/extension/icons/claude.svg
+new file mode 100644
+index 0000000..d455de0
+--- /dev/null
++++ b/extension/icons/claude.svg
+@@ -0,0 +1,5 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48">
++<!-- Claude starburst (claude-zen-sandbox) -->
++<path fill="#d97757" stroke="#d97757" stroke-width="1.1" stroke-linejoin="round" d="M11.84 13.34L22.42 13.28L12.16 10.66ZM11.19 13.08L19.19 17.42L12.81 10.92ZM10.76 12.53L16.22 21.94L13.24 11.47ZM10.66 11.84L10.95 20.54L13.34 12.16ZM10.92 11.19L5.86 20.15L13.08 12.81ZM11.47 10.76L3.35 15.67L12.53 13.24ZM12.16 10.66L1.18 10.67L11.84 13.34ZM12.81 10.92L4.97 6.70L11.19 13.08ZM13.24 11.47L8.09 2.79L10.76 12.53ZM13.34 12.16L13.17 2.47L10.66 11.84ZM13.08 12.81L18.38 3.53L10.92 11.19ZM12.53 13.24L20.19 8.52L11.47 10.76Z"/>
++<circle cx="12" cy="12" r="2.6" fill="#d97757"/>
++</svg>
+diff --git a/extension/manifest.json b/extension/manifest.json
+index dacf095..5f8d57b 100644
+--- a/extension/manifest.json
++++ b/extension/manifest.json
+@@ -1,12 +1,12 @@
+ {
+   "manifest_version": 2,
+-  "name": "Claudezilla",
+-  "version": "0.7.7",
++  "name": "Claudezilla for Claude's Zen",
++  "version": "0.7.7.6",
+   "description": "Browser automation for Claude Code via Firefox. No Chrome, no telemetry. Navigate, screenshot, click, type, extract data via MCP.",
+   "author": "Chris Lyons <support@boot.industries>",
+   "browser_specific_settings": {
+     "gecko": {
+-      "id": "claudezilla@boot.industries",
++      "id": "claude-zen@aphesist",
+       "strict_min_version": "140.0",
+       "data_collection_permissions": {
+         "required": [
+@@ -21,7 +21,8 @@
+     "activeTab",
+     "<all_urls>",
+     "webRequest",
+-    "storage"
++    "storage",
++    "menus"
+   ],
+   "background": {
+     "scripts": [
+@@ -43,12 +44,15 @@
+     }
+   ],
+   "browser_action": {
+-    "default_icon": "icons/claudezilla-48.svg",
++    "default_icon": "icons/claude.svg",
+     "default_title": "Claudezilla",
+     "default_popup": "popup/popup.html"
+   },
+   "icons": {
+-    "48": "icons/claudezilla-48.svg"
++    "16": "icons/claude.svg",
++    "32": "icons/claude.svg",
++    "48": "icons/claude.svg",
++    "96": "icons/claude.svg"
+   },
+   "content_security_policy": "script-src 'self'; object-src 'self'"
+ }

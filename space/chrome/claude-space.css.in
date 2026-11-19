@@ -1,0 +1,98 @@
+/* Claude's Space in your own Zen (claude-zen-sandbox, Space mode).
+ * @SPACE@ is the Claude Space's id, filled in by install.sh. Only that Space changes:
+ *
+ * - Claude-orange tabs: a thin outline on all of them, a filled one on the tab
+ *   selected there, pulsing while Claude acts.
+ * - The pixel Claude instead of the Space's name and icon on the row above the tabs.
+ *   Expanded sidebar: it stands at the right and crab-walks along the row while working.
+ *   Collapsed sidebar: it's centered and shuffles in place.
+ * - Its bottom Space button shows the pixel Claude: idle, reading ("· · ·") or working.
+ *
+ * Mood: the patched add-on sets the window's title preface to an invisible marker
+ * (U+200B working, U+200C reading), which shows up as the titlepreface attribute.
+ */
+:root { --claude-orange: #d97757; }
+
+/* ---------------------------------------------------------------- tabs */
+.tabbrowser-tab[zen-workspace-id="@SPACE@"] > .tab-stack > .tab-background {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--claude-orange) 35%, transparent) !important;
+}
+.tabbrowser-tab[zen-workspace-id="@SPACE@"][selected] > .tab-stack > .tab-background {
+  background: color-mix(in srgb, var(--claude-orange) 16%, transparent) !important;
+  box-shadow: inset 0 0 0 1.5px var(--claude-orange) !important;
+}
+:root[titlepreface^="\200B"] .tabbrowser-tab[zen-workspace-id="@SPACE@"][selected] > .tab-stack > .tab-background {
+  animation: claude-tab-pulse 1.4s ease-in-out infinite;
+}
+@keyframes claude-tab-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1.5px var(--claude-orange), 0 0 0 0 transparent; }
+  50%      { box-shadow: inset 0 0 0 1.5px var(--claude-orange), 0 0 10px 1px color-mix(in srgb, var(--claude-orange) 55%, transparent); }
+}
+
+/* ---------------------------------------------------------------- the Space's title row */
+zen-workspace[id="@SPACE@"] .zen-current-workspace-indicator {
+  overflow: visible !important;
+  position: relative;
+  min-height: 36px;
+}
+zen-workspace[id="@SPACE@"] :is(.zen-current-workspace-indicator-name,
+                                 .zen-current-workspace-indicator-stack) {
+  visibility: hidden !important;
+}
+zen-workspace[id="@SPACE@"] .zen-current-workspace-indicator::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  /* 11 x 11 pixels, 3.125 px each = 5 screen pixels at 1.6 scale: crisp */
+  width: 34.375px;
+  height: 34.375px;
+  right: 10px;
+  bottom: -2px;
+  pointer-events: none;
+  background: url("claude-critter-idle.svg") center / contain no-repeat;
+  image-rendering: pixelated;
+}
+:root[titlepreface^="\200C"] zen-workspace[id="@SPACE@"] .zen-current-workspace-indicator::after {
+  background-image: url("claude-critter-reading.svg");
+}
+:root[titlepreface^="\200B"] zen-workspace[id="@SPACE@"] .zen-current-workspace-indicator::after {
+  background-image: url("claude-critter-acting.svg");
+  animation: claude-crab-walk 2.8s ease-in-out infinite alternate;
+}
+@keyframes claude-crab-walk {
+  0%   { right: 10px; }
+  45%  { right: calc(100% - 46px); }
+  55%  { right: calc(100% - 46px); }
+  100% { right: 10px; }
+}
+/* collapsed sidebar: centered, shuffling in place */
+:root:not([zen-sidebar-expanded="true"]) zen-workspace[id="@SPACE@"] .zen-current-workspace-indicator::after {
+  right: auto;
+  left: calc(50% - 17.1875px);
+}
+:root:not([zen-sidebar-expanded="true"])[titlepreface^="\200B"] zen-workspace[id="@SPACE@"] .zen-current-workspace-indicator::after {
+  animation: claude-crab-shuffle 0.9s steps(2, jump-none) infinite alternate;
+}
+@keyframes claude-crab-shuffle {
+  from { translate: -3.125px 0; }
+  to   { translate: 3.125px 0; }
+}
+
+/* ---------------------------------------------------------------- its bottom Space button */
+#zen-workspaces-button toolbarbutton[zen-workspace-id="@SPACE@"] .zen-workspace-icon {
+  visibility: hidden !important;
+}
+#zen-workspaces-button toolbarbutton[zen-workspace-id="@SPACE@"] {
+  background-image: url("claude-critter-idle.svg") !important;
+  background-position: center !important;
+  background-size: 20.625px !important;        /* 3 screen pixels per critter pixel */
+  background-repeat: no-repeat !important;
+  image-rendering: pixelated;
+  opacity: 1 !important;
+}
+:root[titlepreface^="\200C"] #zen-workspaces-button toolbarbutton[zen-workspace-id="@SPACE@"] {
+  background-image: url("claude-critter-reading.svg") !important;
+}
+:root[titlepreface^="\200B"] #zen-workspaces-button toolbarbutton[zen-workspace-id="@SPACE@"] {
+  background-image: url("claude-critter-acting.svg") !important;
+}
