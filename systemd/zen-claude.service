@@ -1,0 +1,14 @@
+[Unit]
+Description=Zen for Claude (separate profile with Claudezilla; claude-zen-sandbox)
+# Started on demand by Claudezilla's MCP server (CLAUDEZILLA_AUTOSTART_CMD) the first
+# time Claude uses the browser, or by hand: systemctl --user start zen-claude
+
+[Service]
+# CLAUDEZILLA_ALLOW_QUIT: this browser exists for the agent, so the host may close it
+# cleanly (ExecStop); a plain SIGTERM would skip writing its session and cache.
+Environment=CLAUDEZILLA_ALLOW_QUIT=1
+# --name gives its windows their own app id (zen-claude): Hyprland can tell them
+# apart, and it never takes links meant for your own Zen (--no-remote too).
+ExecStart=/usr/bin/zen-browser --no-remote --name zen-claude --profile %h/.config/zen/claude about:blank
+ExecStop=/usr/bin/node %h/.local/share/claudezilla/host/cli.js quitBrowser
+TimeoutStopSec=10
