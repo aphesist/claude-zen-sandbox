@@ -170,7 +170,7 @@ index 0000000..f43d97e
 +const target = decodeURIComponent(location.hash.slice(1));
 +if (/^https?:\/\//i.test(target)) location.replace(target);
 diff --git a/extension/content.js b/extension/content.js
-index ae76c67..f87ecc4 100644
+index ae76c67..40bf54e 100644
 --- a/extension/content.js
 +++ b/extension/content.js
 @@ -10,7 +10,7 @@
@@ -253,6 +253,61 @@ index ae76c67..f87ecc4 100644
      }
    `;
    document.head.appendChild(style);
+@@ -1535,13 +1509,48 @@ async function type(params) {
+     }));
+     element.dispatchEvent(new Event('change', { bubbles: true }));
+   } else if (isContentEditable) {
+-    if (clear) {
+-      element.textContent = '';
++    // Rich editors (Lexical: WhatsApp, Facebook; Draft.js; ProseMirror; Slate) keep their own
++    // model and ignore raw DOM edits. Insert through the browser's editing pipeline instead,
++    // which fires the beforeinput/input events they listen to; fall back to a synthetic paste,
++    // and only then to a raw DOM edit.
++    const root = element.closest('[contenteditable]:not([contenteditable="false"])') || element;
++    const sel = window.getSelection();
++    const placeCaret = (all) => {
++      const range = document.createRange();
++      range.selectNodeContents(root);
++      if (!all) range.collapse(false);
++      sel.removeAllRanges();
++      sel.addRange(range);
++    };
++    const settle = () => new Promise(r => setTimeout(r, 30));
++    const before = root.innerText;
++    root.focus();
++    placeCaret(clear);
++    await settle();
++    if (clear && root.innerText.trim()) {
++      document.execCommand('delete', false);
++      await settle();
++    }
++    let ok = document.execCommand('insertText', false, text) && root.innerText.includes(text);
++    if (!ok) {
++      await settle();
++      ok = root.innerText.includes(text) && root.innerText !== before;
++    }
++    if (!ok) {
++      try {
++        placeCaret(false);
++        const dt = new DataTransfer();
++        dt.setData('text/plain', text);
++        root.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
++        await settle();
++        ok = root.innerText.includes(text);
++      } catch (e) { /* no ClipboardEvent constructor: fall through */ }
++    }
++    if (!ok) {
++      if (clear) root.textContent = '';
++      root.textContent += text;
++      root.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+     }
+-    element.textContent += text;
+-
+-    // Dispatch input event
+-    element.dispatchEvent(new Event('input', { bubbles: true }));
+   }
+ 
+   return {
 diff --git a/extension/icons/claude.svg b/extension/icons/claude.svg
 new file mode 100644
 index 0000000..d455de0
@@ -265,7 +320,7 @@ index 0000000..d455de0
 +<circle cx="12" cy="12" r="2.6" fill="#d97757"/>
 +</svg>
 diff --git a/extension/manifest.json b/extension/manifest.json
-index dacf095..5f8d57b 100644
+index dacf095..4644987 100644
 --- a/extension/manifest.json
 +++ b/extension/manifest.json
 @@ -1,12 +1,12 @@
@@ -274,7 +329,7 @@ index dacf095..5f8d57b 100644
 -  "name": "Claudezilla",
 -  "version": "0.7.7",
 +  "name": "Claudezilla for Claude's Zen",
-+  "version": "0.7.7.6",
++  "version": "0.7.7.7",
    "description": "Browser automation for Claude Code via Firefox. No Chrome, no telemetry. Navigate, screenshot, click, type, extract data via MCP.",
    "author": "Chris Lyons <support@boot.industries>",
    "browser_specific_settings": {
