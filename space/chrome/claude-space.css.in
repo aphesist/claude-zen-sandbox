@@ -1,8 +1,8 @@
 /* Claude's Space in your own Zen (claude-zen-sandbox, Space mode).
  * @SPACE@ is the Claude Space's id, filled in by install.sh. Only that Space changes:
  *
- * - Claude-orange tabs: a thin outline on all of them, a filled one on the tab
- *   selected there, pulsing while Claude acts.
+ * - Claude-orange tabs: collapsed sidebar, the selected tab's nub in orange, glowing
+ *   while Claude acts; expanded, an outline on all of them, filled on the selected one.
  * - The pixel Claude instead of the Space's name and icon on the row above the tabs.
  *   Expanded sidebar: it stands at the right and crab-walks along the row while working.
  *   Collapsed sidebar: it's centered and shuffles in place.
@@ -13,15 +13,29 @@
  */
 :root { --claude-orange: #d97757; }
 
-/* ---------------------------------------------------------------- tabs */
-.tabbrowser-tab[zen-workspace-id="@SPACE@"] > .tab-stack > .tab-background {
+/* ---------------------------------------------------------------- tabs
+ * Collapsed sidebar: no outlines, no filled box. The selected tab gets the sidebar's nub
+ * (panacea-island / panacea-config's panacea-dock.css) in Claude's orange, glowing in pulses
+ * while Claude acts. Expanded sidebar: a thin outline on every tab, a filled one on the
+ * selected tab, pulsing while Claude acts. */
+.tabbrowser-tab[zen-workspace-id="@SPACE@"] {
+  --panacea-tab-color: var(--claude-orange) !important;
+}
+:root[titlepreface^="\200B"]:not([zen-sidebar-expanded="true"]) .tabbrowser-tab[zen-workspace-id="@SPACE@"][visuallyselected] > .tab-stack > .tab-content::after {
+  animation: claude-nub-pulse 1.4s ease-in-out infinite;
+}
+@keyframes claude-nub-pulse {
+  0%, 100% { box-shadow: 0 0 6px color-mix(in srgb, var(--claude-orange) 45%, transparent); }
+  50%      { box-shadow: 0 0 14px 2px color-mix(in srgb, var(--claude-orange) 85%, transparent); }
+}
+:root[zen-sidebar-expanded="true"] .tabbrowser-tab[zen-workspace-id="@SPACE@"] > .tab-stack > .tab-background {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--claude-orange) 35%, transparent) !important;
 }
-.tabbrowser-tab[zen-workspace-id="@SPACE@"][selected] > .tab-stack > .tab-background {
+:root[zen-sidebar-expanded="true"] .tabbrowser-tab[zen-workspace-id="@SPACE@"][selected] > .tab-stack > .tab-background {
   background: color-mix(in srgb, var(--claude-orange) 16%, transparent) !important;
   box-shadow: inset 0 0 0 1.5px var(--claude-orange) !important;
 }
-:root[titlepreface^="\200B"] .tabbrowser-tab[zen-workspace-id="@SPACE@"][selected] > .tab-stack > .tab-background {
+:root[titlepreface^="\200B"][zen-sidebar-expanded="true"] .tabbrowser-tab[zen-workspace-id="@SPACE@"][selected] > .tab-stack > .tab-background {
   animation: claude-tab-pulse 1.4s ease-in-out infinite;
 }
 @keyframes claude-tab-pulse {
